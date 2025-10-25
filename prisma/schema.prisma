@@ -1,0 +1,67 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relations
+  apiKeys   ApiKey[]
+  usage     ApiUsage[]
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  userId      String
+  isActive    Boolean  @default(true)
+  rateLimit   Int      @default(1000) // requests per hour
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  lastUsedAt  DateTime?
+  
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usage       ApiUsage[]
+  
+  @@index([key])
+  @@index([userId])
+}
+
+model ApiUsage {
+  id            String   @id @default(cuid())
+  apiKeyId      String
+  endpoint      String   // chat/completions, images/generations, etc.
+  model         String?  // gpt-3.5-turbo, gpt-4, dall-e-3, etc.
+  tokensUsed    Int?     // for text models
+  cost          Float?   // calculated cost
+  requestTime   Int      // response time in ms
+  statusCode    Int      // HTTP status code
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime @default(now())
+  
+  // Relations
+  apiKey        ApiKey   @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  
+  @@index([apiKeyId])
+  @@index([createdAt])
+  @@index([endpoint])
+}
