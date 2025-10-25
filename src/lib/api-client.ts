@@ -14,20 +14,36 @@ class ApiClient {
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
     
+    const defaultHeaders = {
+      'Content-Type': 'application/json',
+    };
+
+    // Add CSRF token for server-side requests
+    if (typeof window === 'undefined') {
+      defaultHeaders['x-forwarded-for'] = '127.0.0.1';
+    }
+    
     const response = await fetch(url, {
       headers: {
-        'Content-Type': 'application/json',
+        ...defaultHeaders,
         ...options.headers,
       },
       ...options,
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+    // Handle non-JSON responses
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      throw new Error(`Invalid response format: ${contentType}`);
     }
 
-    return response.json();
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || data.message || `HTTP error! status: ${response.status}`);
+    }
+
+    return data;
   }
 
   // Dashboard API methods

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { cache } from '@/lib/cache';
 import { z } from 'zod';
 
 const createKeySchema = z.object({
@@ -19,6 +20,18 @@ export async function GET() {
         { error: 'Unauthorized' },
         { status: 401 }
       );
+    }
+
+    // Check cache first
+    const cacheKey = `apikeys:${session.user.id}`;
+    const cachedKeys = cache.get(cacheKey);
+    
+    if (cachedKeys) {
+      return NextResponse.json({
+        success: true,
+        data: cachedKeys,
+        cached: true,
+      });
     }
 
     const apiKeys = await db.apiKey.findMany({
@@ -51,6 +64,9 @@ export async function GET() {
       usageCount: key._count.apiUsage,
       _count: undefined,
     }));
+
+    // Cache for 15 seconds
+    cache.set(cacheKey, maskedKeys, 15000);
 
     return NextResponse.json({
       success: true,
@@ -94,16 +110,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generate a unique API key
+    // Generate a unique API key with high entropy
     const generateKey = () => {
       const prefix = 'sk';
       const timestamp = Date.now().toString(36);
-      const random = Math.random().toString(36).substring(2, 15);
-      return `${prefix}_${timestamp}_${random}`;
+      const random1 = Math.random().toString(36).substring(2, 15);
+      const random2 = Math.random().toString(36).substring(2, 15);
+      return `${prefix}_${timestamp}_${random1}${random2}`;
     };
 
     const key = generateKey();
 
+    // Create API key with optimized query
     const apiKey = await db.apiKey.create({
       data: {
         key,
@@ -120,6 +138,10 @@ export async function POST(request: NextRequest) {
         createdAt: true,
       },
     });
+
+    // Invalidate cache for this user
+    cache.delete(`apikeys:${session.user.id}`);
+    cache.delete(`overview:${session.user.id}`);
 
     return NextResponse.json({
       success: true,

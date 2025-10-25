@@ -145,6 +145,7 @@ export default function Home() {
     }
 
     try {
+      setLoading(true);
       const response = await apiClient.createApiKey({
         name: newKeyName.trim(),
         rateLimit: parseInt(newKeyRateLimit),
@@ -165,9 +166,17 @@ export default function Home() {
             onClick: () => copyToClipboard(response.data.key),
           },
         });
+        
+        // Refresh the overview data
+        loadDashboardData();
+      } else {
+        toast.error(response.error || 'Failed to create API key');
       }
     } catch (error: any) {
+      console.error('Create API key error:', error);
       toast.error(error.message || 'Failed to create API key');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -592,11 +601,27 @@ const response = await openai.chat.completions.create({
                 <CardContent className="space-y-4">
                   <div>
                     <h4 className="font-semibold">POST /v1/chat/completions</h4>
-                    <p className="text-sm text-muted-foreground">Create chat completions</p>
+                    <p className="text-sm text-muted-foreground">Create chat completions with GLM-4.5-Flash</p>
                   </div>
                   <div>
                     <h4 className="font-semibold">POST /v1/images/generations</h4>
-                    <p className="text-sm text-muted-foreground">Generate images</p>
+                    <p className="text-sm text-muted-foreground">Generate images with DALL-E compatible API</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">POST /v1/embeddings</h4>
+                    <p className="text-sm text-muted-foreground">Create text embeddings</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">POST /v1/moderations</h4>
+                    <p className="text-sm text-muted-foreground">Check content for policy violations</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">POST /v1/fine-tuning/jobs</h4>
+                    <p className="text-sm text-muted-foreground">Create fine-tuning jobs</p>
+                  </div>
+                  <div>
+                    <h4 className="font-semibold">GET /v1/fine-tuning/jobs</h4>
+                    <p className="text-sm text-muted-foreground">List fine-tuning jobs</p>
                   </div>
                   <div>
                     <h4 className="font-semibold">GET /v1/models</h4>

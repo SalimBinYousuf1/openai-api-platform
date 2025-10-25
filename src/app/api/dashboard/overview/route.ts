@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
+import { cache } from '@/lib/cache';
 
 export async function GET() {
   try {
@@ -14,7 +15,19 @@ export async function GET() {
       );
     }
 
-    // Get user's API keys
+    // Check cache first for extreme performance
+    const cacheKey = `overview:${session.user.id}`;
+    const cachedData = cache.get(cacheKey);
+    
+    if (cachedData) {
+      return NextResponse.json({
+        success: true,
+        data: cachedData,
+        cached: true,
+      });
+    }
+
+    // Get user's API keys with optimized query
     const userApiKeys = await db.apiKey.findMany({
       where: {
         userId: session.user.id,
@@ -30,13 +43,42 @@ export async function GET() {
 
     const apiKeyIds = userApiKeys.map(key => key.id);
 
-    // Calculate date ranges for different periods
+    if (apiKeyIds.length === 0) {
+      const emptyData = {
+        stats: {
+          totalRequests: 0,
+          totalCost: 0,
+          totalTokens: 0,
+          avgResponseTime: 0,
+          activeKeys: 0,
+          totalKeys: 0,
+        },
+        growth: {
+          requests: 0,
+          last24Hours: 0,
+          last7Days: 0,
+        },
+        recentUsage: [],
+        topEndpoints: [],
+        apiKeys: [],
+      };
+      
+      // Cache empty result
+      cache.set(cacheKey, emptyData, 30000); // 30 seconds
+      
+      return NextResponse.json({
+        success: true,
+        data: emptyData,
+      });
+    }
+
+    // Calculate date ranges
     const now = new Date();
     const last30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     const last7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    // Get usage statistics for different periods
+    // Run all queries in parallel for maximum speed
     const [
       totalStats,
       last7DaysStats,
@@ -77,7 +119,7 @@ export async function GET() {
         _count: { id: true },
       }),
 
-      // Recent usage records
+      // Recent usage records (limited for performance)
       db.apiUsage.findMany({
         where: {
           apiKeyId: { in: apiKeyIds },
@@ -88,7 +130,7 @@ export async function GET() {
           },
         },
         orderBy: { createdAt: 'desc' },
-        take: 10,
+        take: 5, // Reduced for better performance
       }),
 
       // Top endpoints by usage
@@ -104,16 +146,15 @@ export async function GET() {
         },
         _count: { id: true },
         orderBy: { _count: { id: 'desc' } },
-        take: 5,
+        take: 3, // Reduced for better performance
       }),
     ]);
 
-    // Calculate average response time
+    // Calculate metrics
     const avgResponseTime = totalStats._count.id > 0 
       ? Math.round((totalStats._sum.requestTime || 0) / totalStats._count.id)
       : 0;
 
-    // Calculate growth percentages
     const periodGrowth = last7DaysStats._count.id > 0 
       ? Math.round(((last24HoursStats._count.id * 7) / last7DaysStats._count.id - 1) * 100)
       : 0;
@@ -157,6 +198,9 @@ export async function GET() {
         lastUsedAt: key.lastUsedAt?.toISOString(),
       })),
     };
+
+    // Cache the result for 30 seconds
+    cache.set(cacheKey, overviewData, 30000);
 
     return NextResponse.json({
       success: true,
