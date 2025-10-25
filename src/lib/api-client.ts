@@ -5,7 +5,12 @@ class ApiClient {
   private baseUrl: string;
 
   constructor() {
-    this.baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
+    // Use localhost for development, deployed URL for production
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+      this.baseUrl = 'http://localhost:3000';
+    } else {
+      this.baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
+    }
   }
 
   private async request<T>(

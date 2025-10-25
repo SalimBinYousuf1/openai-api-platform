@@ -3,163 +3,115 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { cache } from '@/lib/cache';
-import { z } from 'zod';
+import { generateApiKey } from '@/lib/utils';
 
-const createKeySchema = z.object({
-  name: z.string().min(1, 'API key name is required').max(100, 'Name too long'),
-  rateLimit: z.number().min(1, 'Rate limit must be at least 1').max(10000, 'Rate limit too high'),
-});
-
-// GET /api/dashboard/keys - Get user's API keys
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    
     if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Check cache first
-    const cacheKey = `apikeys:${session.user.id}`;
-    const cachedKeys = cache.get(cacheKey);
-    
-    if (cachedKeys) {
-      return NextResponse.json({
-        success: true,
-        data: cachedKeys,
-        cached: true,
-      });
+    const cacheKey = `api-keys:${session.user.id}`;
+    const cached = cache.get(cacheKey);
+    if (cached) {
+      return NextResponse.json({ success: true, data: cached });
     }
 
     const apiKeys = await db.apiKey.findMany({
-      where: {
-        userId: session.user.id,
-      },
-      select: {
-        id: true,
-        key: true,
-        name: true,
-        isActive: true,
-        rateLimit: true,
-        createdAt: true,
-        lastUsedAt: true,
+      where: { userId: session.user.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
         _count: {
           select: {
-            apiUsage: true,
+            usage: true
           }
         }
-      },
-      orderBy: {
-        createdAt: 'desc',
-      },
+      }
     });
 
-    // Don't expose full keys in list view
-    const maskedKeys = apiKeys.map(key => ({
-      ...key,
-      key: key.key.substring(0, 10) + '...',
-      usageCount: key._count.apiUsage,
-      _count: undefined,
+    const keysWithUsage = apiKeys.map(key => ({
+      id: key.id,
+      key: key.key,
+      name: key.name,
+      isActive: key.isActive,
+      rateLimit: key.rateLimit,
+      createdAt: key.createdAt.toISOString(),
+      lastUsedAt: key.lastUsedAt?.toISOString(),
+      usageCount: key._count.usage
     }));
 
-    // Cache for 15 seconds
-    cache.set(cacheKey, maskedKeys, 15000);
+    cache.set(cacheKey, keysWithUsage, 30 * 1000); // 30 seconds TTL
 
-    return NextResponse.json({
-      success: true,
-      data: maskedKeys,
-    });
+    return NextResponse.json({ success: true, data: keysWithUsage });
   } catch (error) {
-    console.error('Failed to fetch API keys:', error);
+    console.error('API Keys GET error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch API keys' },
+      { error: 'Failed to fetch API keys' },
       { status: 500 }
     );
   }
 }
 
-// POST /api/dashboard/keys - Create new API key
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    
     if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { name, rateLimit } = createKeySchema.parse(body);
+    const { name, rateLimit } = await request.json();
 
-    // Check user's current API key limit (max 5 keys per user)
-    const existingKeyCount = await db.apiKey.count({
-      where: {
-        userId: session.user.id,
-      },
-    });
-
-    if (existingKeyCount >= 5) {
+    if (!name || !rateLimit) {
       return NextResponse.json(
-        { error: 'Maximum API key limit reached (5 keys per user)' },
+        { error: 'Name and rate limit are required' },
         { status: 400 }
       );
     }
 
-    // Generate a unique API key with high entropy
-    const generateKey = () => {
-      const prefix = 'sk';
-      const timestamp = Date.now().toString(36);
-      const random1 = Math.random().toString(36).substring(2, 15);
-      const random2 = Math.random().toString(36).substring(2, 15);
-      return `${prefix}_${timestamp}_${random1}${random2}`;
-    };
+    // Generate unique API key
+    const key = generateApiKey();
 
-    const key = generateKey();
+    // Check if key already exists (very unlikely but just in case)
+    const existingKey = await db.apiKey.findUnique({
+      where: { key }
+    });
 
-    // Create API key with optimized query
+    if (existingKey) {
+      return NextResponse.json(
+        { error: 'Key generation failed, please try again' },
+        { status: 500 }
+      );
+    }
+
     const apiKey = await db.apiKey.create({
       data: {
         key,
-        name: name.trim(),
-        rateLimit,
-        userId: session.user.id,
-      },
-      select: {
-        id: true,
-        key: true,
-        name: true,
-        isActive: true,
-        rateLimit: true,
-        createdAt: true,
-      },
+        name,
+        rateLimit: parseInt(rateLimit),
+        userId: session.user.id
+      }
     });
 
-    // Invalidate cache for this user
-    cache.delete(`apikeys:${session.user.id}`);
+    // Clear cache
+    cache.delete(`api-keys:${session.user.id}`);
     cache.delete(`overview:${session.user.id}`);
 
     return NextResponse.json({
       success: true,
-      data: apiKey,
-      message: 'API key created successfully',
+      data: {
+        id: apiKey.id,
+        key: apiKey.key,
+        name: apiKey.name,
+        isActive: apiKey.isActive,
+        rateLimit: apiKey.rateLimit,
+        createdAt: apiKey.createdAt.toISOString()
+      }
     });
   } catch (error) {
-    console.error('Failed to create API key:', error);
-    
-    if (error instanceof z.ZodError) {
-      return NextResponse.json(
-        { error: 'Validation failed', details: error.errors },
-        { status: 400 }
-      );
-    }
-
+    console.error('API Keys POST error:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to create API key' },
+      { error: 'Failed to create API key' },
       { status: 500 }
     );
   }
