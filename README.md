@@ -1,66 +1,94 @@
-# 🚀 Salim API Platform
+# 🚀 OpenAI Compatible API Platform
 
-A professional OpenAI-compatible API platform that proxies to Z.ai's powerful AI models. Built with Next.js 15, TypeScript, and modern web technologies.
+A high-performance, production-ready OpenAI-compatible API platform built with Next.js 15, TypeScript, and Prisma. Features GLM-4.5-Flash integration, real-time analytics, and a professional dashboard.
 
 ## ✨ Features
 
 ### 🎯 Core Functionality
-- **🔄 OpenAI-Compatible API** - Drop-in replacement for OpenAI SDK
-- **🤖 Z.ai Integration** - Leverages Z.ai's powerful AI models behind the scenes
-- **🔐 API Key Management** - Secure authentication and rate limiting
-- **📊 Usage Analytics** - Real-time monitoring and cost tracking
-- **🎨 Developer Dashboard** - Professional UI for API management
+- **OpenAI-Compatible API**: Full compatibility with OpenAI SDK and existing integrations
+- **GLM-4.5-Flash Integration**: Default model with advanced AI capabilities
+- **Real-time Analytics**: Live usage statistics, cost tracking, and performance metrics
+- **API Key Management**: Secure key generation, rate limiting, and usage monitoring
+- **Authentication**: Secure user authentication with NextAuth.js
+- **Responsive Dashboard**: Modern UI built with shadcn/ui components
 
-### 🛠️ Technical Stack
-- **⚡ Next.js 15** - Modern React framework with App Router
-- **📘 TypeScript 5** - Type-safe development
-- **🎨 Tailwind CSS 4** - Utility-first styling
-- **🧩 shadcn/ui** - Professional UI components
-- **🗄️ Prisma** - Type-safe database ORM
-- **🔐 NextAuth.js** - Authentication solution
+### 🛠️ API Endpoints
+- `POST /v1/chat/completions` - Chat completions with GLM-4.5-Flash
+- `POST /v1/images/generations` - DALL-E compatible image generation
+- `POST /v1/embeddings` - Text embeddings
+- `POST /v1/moderations` - Content moderation
+- `POST /v1/fine-tuning/jobs` - Fine-tuning job management
+- `GET /v1/models` - List available models (18+ models)
 
-### 🌐 API Endpoints
-- **POST /v1/chat/completions** - Chat completions with GPT models
-- **POST /v1/images/generations** - Image generation with DALL-E models
-- **GET /v1/models** - List available models
-- **🔒 Rate Limiting** - Configurable per-key rate limits
-- **📈 Usage Tracking** - Detailed analytics and cost monitoring
+### 📊 Dashboard Features
+- Overview statistics with real-time updates
+- API key creation and management
+- Usage analytics with breakdown by endpoint
+- Cost tracking and budget monitoring
+- Performance metrics and response times
+- Recent activity logs
 
 ## 🚀 Quick Start
 
+### Prerequisites
+- Node.js 18+ 
+- npm or yarn
+
+### Installation
+
+1. **Clone the repository**
 ```bash
-# Install dependencies
+git clone <repository-url>
+cd openai-api-platform
+```
+
+2. **Install dependencies**
+```bash
 npm install
+```
 
-# Set up database
+3. **Set up environment variables**
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your configuration:
+```env
+DATABASE_URL=file:./db/custom.db
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-secret-key-here
+NEXT_PUBLIC_API_URL=http://localhost:3000
+```
+
+4. **Initialize the database**
+```bash
 npm run db:push
+```
 
-# Start development server
+5. **Create default user (optional)**
+```bash
+npx tsx src/scripts/create-default-user.ts
+```
+
+6. **Start the development server**
+```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see the developer dashboard.
-
-## 🔧 Configuration
-
-### Environment Variables
-
-Create a `.env.local` file:
-
-```env
-# Database
-DATABASE_URL="file:./dev.db"
-
-# API Configuration
-API_BASE_URL="http://localhost:3000/api/v1"
-NEXTAUTH_SECRET="your-secret-key"
-NEXTAUTH_URL="http://localhost:3000"
-```
+7. **Access the application**
+- Dashboard: http://localhost:3000
+- API Documentation: Available in the dashboard
+- Default login: `admin@example.com` / `admin123`
 
 ## 📖 API Usage
 
-### Basic Example
+### Authentication
+Include your API key in the Authorization header:
+```bash
+Authorization: Bearer sk-your-api-key
+```
 
+### Example: Chat Completions
 ```javascript
 import OpenAI from 'openai';
 
@@ -69,132 +97,134 @@ const openai = new OpenAI({
   baseURL: 'http://localhost:3000/api/v1',
 });
 
-// Chat completion
 const response = await openai.chat.completions.create({
   model: 'gpt-3.5-turbo',
   messages: [{ role: 'user', content: 'Hello!' }],
 });
+```
 
-// Image generation
-const image = await openai.images.generate({
-  model: 'dall-e-3',
-  prompt: 'A beautiful sunset',
+### Example: Image Generation
+```javascript
+const response = await openai.images.generate({
+  prompt: 'A beautiful sunset over mountains',
+  n: 1,
   size: '1024x1024',
 });
 ```
 
-### cURL Example
-
-```bash
-curl http://localhost:3000/api/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer sk-your-api-key" \
-  -d '{
-    "model": "gpt-3.5-turbo",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
-
-## 🎯 Supported Models
-
-### Text Models
-- `gpt-3.5-turbo` - Fast and efficient
-- `gpt-4` - Most capable
-- `gpt-4-turbo` - Optimized performance
-- `gpt-4o` - Latest GPT-4 variant
-- `gpt-4o-mini` - Cost-effective
-
-### Image Models
-- `dall-e-3` - High-quality generation
-- `dall-e-2` - Standard generation
-
-## 📊 Developer Dashboard
-
-The platform includes a comprehensive dashboard for:
-
-- **🔑 API Key Management** - Create, manage, and revoke API keys
-- **📈 Usage Analytics** - Monitor requests, costs, and performance
-- **📋 Model Information** - View available models and pricing
-- **📖 Documentation** - Integrated API documentation
-
 ## 🏗️ Architecture
 
+### Technology Stack
+- **Framework**: Next.js 15 with App Router
+- **Language**: TypeScript 5
+- **Database**: Prisma ORM with SQLite
+- **Authentication**: NextAuth.js v4
+- **UI Components**: shadcn/ui with Tailwind CSS 4
+- **State Management**: Zustand + TanStack Query
+- **API Integration**: Z.ai Web Dev SDK
+
+### Project Structure
 ```
 src/
-├── app/
-│   ├── api/v1/              # API endpoints
-│   │   ├── chat/
-│   │   ├── images/
-│   │   └── models/
-│   └── page.tsx             # Developer dashboard
-├── lib/
-│   ├── api-auth.ts          # Authentication middleware
-│   ├── api-usage.ts         # Usage tracking
-│   ├── api-keys.ts          # API key management
-│   └── db.ts                # Database client
-├── types/
-│   └── openai.ts            # OpenAI-compatible types
-└── components/
-    └── ui/                  # shadcn/ui components
+├── app/                    # Next.js App Router
+│   ├── api/               # API routes
+│   │   ├── v1/           # OpenAI-compatible endpoints
+│   │   └── dashboard/    # Dashboard API endpoints
+│   ├── auth/             # Authentication pages
+│   └── globals.css       # Global styles
+├── components/            # React components
+│   ├── ui/              # shadcn/ui components
+│   └── providers/       # Context providers
+├── lib/                  # Utility libraries
+│   ├── auth.ts          # NextAuth configuration
+│   ├── db.ts            # Prisma client
+│   ├── cache.ts         # Memory cache
+│   └── api-client.ts    # API client
+└── types/               # TypeScript definitions
 ```
 
-## 🔐 Security Features
+## 🔧 Configuration
 
-- **🔑 API Key Authentication** - Secure Bearer token authentication
-- **🚦 Rate Limiting** - Configurable per-key rate limits
-- **📊 Usage Monitoring** - Real-time usage tracking
-- **🔒 CORS Protection** - Proper cross-origin resource sharing
-- **🛡️ Input Validation** - Comprehensive request validation
+### Environment Variables
+- `DATABASE_URL`: Database connection string
+- `NEXTAUTH_URL`: NextAuth.js URL
+- `NEXTAUTH_SECRET`: NextAuth.js secret
+- `NEXT_PUBLIC_API_URL`: Public API URL
 
-## 📈 Pricing
+### Database Configuration
+The application uses SQLite by default for simplicity. To use PostgreSQL or MySQL:
 
-Pricing is calculated based on actual usage:
+1. Update `DATABASE_URL` in `.env`
+2. Update `provider` in `prisma/schema.prisma`
+3. Run `npm run db:push`
 
-### Text Models (per 1K tokens)
-- `gpt-3.5-turbo`: $0.002
-- `gpt-4`: $0.03
-- `gpt-4o`: $0.005
-- `gpt-4o-mini`: $0.00015
+## 📊 Performance Features
 
-### Image Models (per image)
-- `dall-e-3` (1024x1024): $0.04
-- `dall-e-2` (1024x1024): $0.02
+### Caching
+- 30-second TTL memory cache for dashboard data
+- Intelligent cache invalidation
+- Parallel database queries
 
-## 🧪 Testing
+### Rate Limiting
+- Per-API-key rate limiting
+- Configurable limits (requests/hour)
+- Automatic throttling
 
-Run the test script to verify API functionality:
+### Monitoring
+- Real-time usage statistics
+- Performance metrics
+- Error tracking
+- Cost analysis
 
-```bash
-node examples/test-api.js
-```
+## 🔒 Security
 
-## 📚 Documentation
-
-- **[API Documentation](./docs/API.md)** - Complete API reference
-- **[Examples](./examples/)** - Code examples and integrations
-- **[Developer Guide](./docs/DEVELOPER.md)** - Development setup
+- bcryptjs password hashing
+- API key authentication
+- CORS protection
+- Input validation
+- SQL injection prevention
+- XSS protection
 
 ## 🚀 Deployment
 
-### Vercel (Recommended)
-
+### Production Build
 ```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Deploy
-vercel
+npm run build
+npm start
 ```
 
-### Docker
+### Environment Setup
+1. Set production environment variables
+2. Configure database
+3. Set up SSL certificates
+4. Configure reverse proxy (nginx)
 
-```bash
-# Build image
-docker build -t salim-api-platform .
-
-# Run container
-docker run -p 3000:3000 salim-api-platform
+### Docker Deployment
+```dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+EXPOSE 3000
+CMD ["npm", "start"]
 ```
+
+## 📈 Monitoring & Analytics
+
+### Dashboard Metrics
+- Total requests and costs
+- Success rates and error tracking
+- Response time analytics
+- API key usage statistics
+- Model performance breakdown
+
+### API Usage Tracking
+- Request logging
+- Cost calculation
+- Token usage tracking
+- Performance monitoring
 
 ## 🤝 Contributing
 
@@ -206,14 +236,25 @@ docker run -p 3000:3000 salim-api-platform
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🆘 Support
 
-- 📖 Check the [documentation](./docs/API.md)
-- 🐛 Report issues on GitHub
-- 💬 Join our community discussions
+For support and questions:
+- Create an issue in the repository
+- Check the API documentation in the dashboard
+- Review the troubleshooting guide
+
+## 🎯 Roadmap
+
+- [ ] Multi-model support
+- [ ] Advanced analytics dashboard
+- [ ] Team collaboration features
+- [ ] Custom model fine-tuning
+- [ ] WebSocket real-time updates
+- [ ] Advanced security features
+- [ ] Multi-tenant support
 
 ---
 
-Built with ❤️ for developers. Powered by [Z.ai](https://z.ai) 🚀
+Built with ❤️ using Next.js, TypeScript, and shadcn/ui
