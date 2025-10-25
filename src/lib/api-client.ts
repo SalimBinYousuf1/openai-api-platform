@@ -28,11 +28,13 @@ class ApiClient {
       defaultHeaders['x-forwarded-for'] = '127.0.0.1';
     }
     
+    // Include credentials for authentication cookies
     const response = await fetch(url, {
       headers: {
         ...defaultHeaders,
         ...options.headers,
       },
+      credentials: 'include',
       ...options,
     });
 
