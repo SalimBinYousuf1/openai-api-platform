@@ -3,12 +3,7 @@ import ZAI from 'z-ai-web-dev-sdk';
 import { authenticateApiRequest, createApiError, createApiResponse } from '@/lib/api-auth';
 import { recordApiUsage, calculateImageCost } from '@/lib/api-usage';
 import { ImageGenerationRequest, ImageGenerationResponse } from '@/types/openai';
-
-// Map OpenAI models to our internal models
-const MODEL_MAPPING: Record<string, string> = {
-  'dall-e-3': 'dall-e-3',
-  'dall-e-2': 'dall-e-2',
-};
+import { ZAI_CONFIG, mapToZaiModel, getModelConfig } from '@/lib/zai-config';
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -36,14 +31,9 @@ export async function POST(request: NextRequest) {
     const size = body.size || '1024x1024';
     const responseFormat = body.response_format || 'url';
 
-    // Validate model
-    if (!MODEL_MAPPING[model]) {
-      return createApiError(
-        `Invalid model: ${model}. Supported models: ${Object.keys(MODEL_MAPPING).join(', ')}`,
-        400,
-        'invalid_request'
-      );
-    }
+    // Get model configuration
+    const modelConfig = getModelConfig(model);
+    const zaiModel = mapToZaiModel(model);
 
     // Validate size
     const validSizes = model === 'dall-e-3' 
@@ -67,42 +57,63 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create Z.ai client
-    const zai = await ZAI.create();
-
     // Generate images
     const images = [];
+    const zai = await ZAI.create();
+    
     for (let i = 0; i < n; i++) {
-      const response = await zai.images.generations.create({
-        prompt: body.prompt,
-        size: size as any, // Type assertion for Z.ai SDK
-      });
+      try {
+        // Make request to Z.ai API for image generation
+        const response = await zai.images.generations.create({
+          prompt: body.prompt,
+          size: size as any, // Type assertion for Z.ai SDK
+        });
 
-      if (responseFormat === 'b64_json' && response.data[0]?.base64) {
-        images.push({
-          b64_json: response.data[0].base64,
-          revised_prompt: response.data[0].revised_prompt,
-        });
-      } else {
-        // For URL format, we'd need to upload the base64 to a storage service
-        // For now, return base64 as a data URL
-        const dataUrl = `data:image/png;base64,${response.data[0]?.base64}`;
-        images.push({
-          url: dataUrl,
-          revised_prompt: response.data[0]?.revised_prompt,
-        });
+        // Process the image response
+        if (response.data && response.data[0]) {
+          const imageData = response.data[0];
+          
+          if (responseFormat === 'b64_json' && imageData.base64) {
+            images.push({
+              b64_json: imageData.base64,
+              revised_prompt: imageData.revised_prompt || body.prompt,
+            });
+          } else {
+            // For URL format, create a data URL from base64
+            const base64Data = imageData.base64;
+            if (base64Data) {
+              const dataUrl = `data:image/png;base64,${base64Data}`;
+              images.push({
+                url: dataUrl,
+                revised_prompt: imageData.revised_prompt || body.prompt,
+              });
+            }
+          }
+        } else {
+          throw new Error('No image data returned from Z.ai API');
+        }
+      } catch (error: any) {
+        console.error(`Image generation ${i + 1} failed:`, error);
+        // Continue with other images if one fails
+        if (i === 0 && n === 1) {
+          throw error; // Re-throw if this is the only image
+        }
       }
     }
 
+    if (images.length === 0) {
+      throw new Error('Failed to generate any images');
+    }
+
     // Create OpenAI-compatible response
-    const response: ImageGenerationResponse = {
+    const response_data: ImageGenerationResponse = {
       created: Math.floor(Date.now() / 1000),
       data: images,
     };
 
     // Record usage
     const requestTime = Date.now() - startTime;
-    const cost = calculateImageCost(model, size) * n;
+    const cost = calculateImageCost(model, size) * images.length;
     
     await recordApiUsage({
       apiKeyId: apiKey.id,
@@ -116,7 +127,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Create response with rate limit headers
-    const apiResponse = createApiResponse(response);
+    const apiResponse = createApiResponse(response_data);
     
     // Add rate limit headers
     apiResponse.headers.set('x-ratelimit-limit-requests', apiKey.rateLimit.toString());
@@ -145,12 +156,20 @@ export async function POST(request: NextRequest) {
       // Ignore auth errors for error tracking
     }
 
+    if (error.name === 'AbortError') {
+      return createApiError(
+        'Request timeout',
+        408,
+        'timeout'
+      );
+    }
+
     if (error.statusCode) {
       return createApiError(error.message, error.statusCode, error.code);
     }
 
     return createApiError(
-      'Internal server error',
+      error.message || 'Internal server error',
       500,
       'internal_error'
     );

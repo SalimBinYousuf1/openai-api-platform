@@ -1,76 +1,15 @@
 import { NextRequest } from 'next/server';
 import { authenticateApiRequest, createApiError, createApiResponse } from '@/lib/api-auth';
 import { ModelsResponse, Model } from '@/types/openai';
+import { MODEL_CONFIGS } from '@/lib/zai-config';
 
-// Available models
-const MODELS: Model[] = [
-  {
-    id: 'gpt-3.5-turbo',
-    object: 'model',
-    created: 1677610602,
-    owned_by: 'openai',
-  },
-  {
-    id: 'gpt-3.5-turbo-16k',
-    object: 'model',
-    created: 1677610602,
-    owned_by: 'openai',
-  },
-  {
-    id: 'gpt-4',
-    object: 'model',
-    created: 1687882410,
-    owned_by: 'openai',
-  },
-  {
-    id: 'gpt-4-32k',
-    object: 'model',
-    created: 1687882410,
-    owned_by: 'openai',
-  },
-  {
-    id: 'gpt-4-turbo',
-    object: 'model',
-    created: 1712361441,
-    owned_by: 'openai',
-  },
-  {
-    id: 'gpt-4o',
-    object: 'model',
-    created: 1715367049,
-    owned_by: 'openai',
-  },
-  {
-    id: 'gpt-4o-mini',
-    object: 'model',
-    created: 1715367049,
-    owned_by: 'openai',
-  },
-  {
-    id: 'text-davinci-003',
-    object: 'model',
-    created: 1677610602,
-    owned_by: 'openai',
-  },
-  {
-    id: 'text-curie-001',
-    object: 'model',
-    created: 1677610602,
-    owned_by: 'openai',
-  },
-  {
-    id: 'dall-e-3',
-    object: 'model',
-    created: 1698798177,
-    owned_by: 'openai',
-  },
-  {
-    id: 'dall-e-2',
-    object: 'model',
-    created: 1677610602,
-    owned_by: 'openai',
-  },
-];
+// Available models based on our configuration
+const MODELS: Model[] = Object.entries(MODEL_CONFIGS).map(([id, config]) => ({
+  id,
+  object: 'model' as const,
+  created: Math.floor(Date.now() / 1000),
+  owned_by: 'z-ai',
+}));
 
 export async function GET(request: NextRequest) {
   try {

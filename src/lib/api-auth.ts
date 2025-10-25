@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/lib/db';
 import { ApiKey } from '@prisma/client';
+import { RateLimiter } from '@/lib/rate-limiter';
 
 export interface AuthenticatedRequest extends NextRequest {
   apiKey: ApiKey;
@@ -57,8 +58,15 @@ export async function authenticateApiRequest(request: NextRequest): Promise<Auth
     throw new ApiAuthError('API key is deactivated', 403);
   }
 
-  // Check rate limiting
-  await checkRateLimit(keyRecord);
+  // Check rate limiting using improved rate limiter
+  const rateLimitResult = await RateLimiter.checkApiKeyRateLimit(keyRecord.id);
+  
+  if (!rateLimitResult.allowed) {
+    throw new ApiAuthError(
+      `Rate limit exceeded. Maximum ${keyRecord.rateLimit} requests per hour.`,
+      429
+    );
+  }
 
   // Update last used timestamp
   await db.apiKey.update({
@@ -73,35 +81,22 @@ export async function authenticateApiRequest(request: NextRequest): Promise<Auth
   return request as AuthenticatedRequest;
 }
 
-async function checkRateLimit(apiKey: ApiKey): Promise<void> {
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  
-  const requestCount = await db.apiUsage.count({
-    where: {
-      apiKeyId: apiKey.id,
-      createdAt: {
-        gte: oneHourAgo,
-      },
-    },
-  });
+export function createApiResponse(data: any, status: number = 200, rateLimitHeaders?: Record<string, string>) {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  };
 
-  if (requestCount >= apiKey.rateLimit) {
-    throw new ApiAuthError(
-      `Rate limit exceeded. Maximum ${apiKey.rateLimit} requests per hour.`,
-      429
-    );
+  // Add rate limit headers if provided
+  if (rateLimitHeaders) {
+    Object.assign(headers, rateLimitHeaders);
   }
-}
 
-export function createApiResponse(data: any, status: number = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
+    headers,
   });
 }
 

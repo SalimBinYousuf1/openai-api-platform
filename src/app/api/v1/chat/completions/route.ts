@@ -1,22 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import ZAI from 'z-ai-web-dev-sdk';
 import { authenticateApiRequest, createApiError, createApiResponse } from '@/lib/api-auth';
 import { recordApiUsage, calculateTokenCost } from '@/lib/api-usage';
 import { ChatCompletionRequest, ChatCompletionResponse } from '@/types/openai';
+import { ZAI_CONFIG, mapToZaiModel, getModelConfig } from '@/lib/zai-config';
 import { v4 as uuidv4 } from 'uuid';
-
-// Map OpenAI models to our internal models
-const MODEL_MAPPING: Record<string, string> = {
-  'gpt-3.5-turbo': 'gpt-3.5-turbo',
-  'gpt-3.5-turbo-16k': 'gpt-3.5-turbo-16k',
-  'gpt-4': 'gpt-4',
-  'gpt-4-32k': 'gpt-4-32k',
-  'gpt-4-turbo': 'gpt-4-turbo',
-  'gpt-4o': 'gpt-4o',
-  'gpt-4o-mini': 'gpt-4o-mini',
-  'text-davinci-003': 'text-davinci-003',
-  'text-curie-001': 'text-curie-001',
-};
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -24,7 +12,7 @@ export async function POST(request: NextRequest) {
   try {
     // Authenticate request
     const authenticatedRequest = await authenticateApiRequest(request);
-    const { apiKey, user } = authenticatedRequest;
+    const { apiKey } = authenticatedRequest;
 
     // Parse request body
     const body: ChatCompletionRequest = await request.json();
@@ -38,8 +26,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Map model
-    const internalModel = MODEL_MAPPING[body.model] || body.model;
+    // Get model configuration
+    const modelConfig = getModelConfig(body.model);
+    const zaiModel = mapToZaiModel(body.model);
 
     // Prepare messages for Z.ai API
     const zaiMessages = body.messages.map(msg => ({
@@ -47,34 +36,31 @@ export async function POST(request: NextRequest) {
       content: msg.content || '',
     }));
 
-    // Create Z.ai client
+    // Create Z.ai client and make request
     const zai = await ZAI.create();
-
-    // Make request to Z.ai API
     const completion = await zai.chat.completions.create({
       messages: zaiMessages,
-      model: internalModel,
-      temperature: body.temperature,
-      max_tokens: body.max_tokens,
+      model: zaiModel,
+      temperature: body.temperature || 0.7,
+      max_tokens: body.max_tokens || modelConfig.maxTokens,
       top_p: body.top_p,
       frequency_penalty: body.frequency_penalty,
       presence_penalty: body.presence_penalty,
       stop: body.stop,
-      // Note: Z.ai might not support all OpenAI parameters, so we pass what it supports
     });
 
-    // Calculate tokens (approximate if not provided)
-    const promptTokens = estimateTokens(JSON.stringify(body.messages));
-    const completionTokens = estimateTokens(completion.choices[0]?.message?.content || '');
-    const totalTokens = promptTokens + completionTokens;
+    // Calculate tokens (use Z.ai's count if available, otherwise estimate)
+    const promptTokens = completion.usage?.prompt_tokens || estimateTokens(JSON.stringify(body.messages));
+    const completionTokens = completion.usage?.completion_tokens || estimateTokens(completion.choices[0]?.message?.content || '');
+    const totalTokens = completion.usage?.total_tokens || promptTokens + completionTokens;
 
     // Create OpenAI-compatible response
-    const response: ChatCompletionResponse = {
-      id: `chatcmpl-${uuidv4()}`,
+    const response_data: ChatCompletionResponse = {
+      id: completion.id || `chatcmpl-${uuidv4()}`,
       object: 'chat.completion',
-      created: Math.floor(Date.now() / 1000),
+      created: completion.created || Math.floor(Date.now() / 1000),
       model: body.model, // Return the original model name
-      choices: completion.choices.map((choice, index) => ({
+      choices: completion.choices.map((choice: any, index: number) => ({
         index,
         message: {
           role: choice.message?.role || 'assistant',
@@ -87,6 +73,7 @@ export async function POST(request: NextRequest) {
         completion_tokens: completionTokens,
         total_tokens: totalTokens,
       },
+      system_fingerprint: completion.system_fingerprint,
     };
 
     // Record usage
@@ -106,12 +93,13 @@ export async function POST(request: NextRequest) {
     });
 
     // Create response with rate limit headers
-    const apiResponse = createApiResponse(response);
+    const rateLimitHeaders = {
+      'x-ratelimit-limit-requests': apiKey.rateLimit.toString(),
+      'x-ratelimit-remaining-requests': Math.max(0, apiKey.rateLimit - 1).toString(),
+      'x-ratelimit-reset-requests': Math.ceil(Date.now() / 1000 + 3600).toString(),
+    };
     
-    // Add rate limit headers
-    apiResponse.headers.set('x-ratelimit-limit-requests', apiKey.rateLimit.toString());
-    apiResponse.headers.set('x-ratelimit-remaining-requests', (apiKey.rateLimit - 1).toString());
-    apiResponse.headers.set('x-ratelimit-reset-requests', Math.ceil(Date.now() / 1000 + 3600).toString());
+    const apiResponse = createApiResponse(response_data, 200, rateLimitHeaders);
 
     return apiResponse;
 
@@ -135,12 +123,20 @@ export async function POST(request: NextRequest) {
       // Ignore auth errors for error tracking
     }
 
+    if (error.name === 'AbortError') {
+      return createApiError(
+        'Request timeout',
+        408,
+        'timeout'
+      );
+    }
+
     if (error.statusCode) {
       return createApiError(error.message, error.statusCode, error.code);
     }
 
     return createApiError(
-      'Internal server error',
+      error.message || 'Internal server error',
       500,
       'internal_error'
     );

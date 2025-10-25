@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSession, signOut } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,8 +10,9 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Copy, Key, BarChart3, Code, Plus, Trash2, Settings } from 'lucide-react';
+import { Copy, Key, BarChart3, Code, Plus, Trash2, Settings, LogOut, TrendingUp, TrendingDown, Users, Clock } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiClient } from '@/lib/api-client';
 
 interface ApiKey {
   id: string;
@@ -19,12 +22,24 @@ interface ApiKey {
   rateLimit: number;
   createdAt: string;
   lastUsedAt?: string;
+  usageCount?: number;
 }
 
-interface UsageStats {
+interface OverviewStats {
+  totalRequests: number;
+  totalCost: number;
+  totalTokens: number;
+  avgResponseTime: number;
+  activeKeys: number;
+  totalKeys: number;
+}
+
+interface UsageData {
   period: string;
   totalRequests: number;
   totalCost: number;
+  totalTokens: number;
+  avgResponseTime: number;
   breakdown: Array<{
     endpoint: string;
     model?: string;
@@ -33,95 +48,94 @@ interface UsageStats {
     cost: number;
     avgResponseTime: number;
   }>;
+  recentUsage: Array<{
+    id: string;
+    endpoint: string;
+    model?: string;
+    cost: number;
+    statusCode: number;
+    requestTime: number;
+    apiKeyName: string;
+    createdAt: string;
+  }>;
+  summary: {
+    successfulRequests: number;
+    failedRequests: number;
+    successRate: number;
+  };
 }
 
 export default function Home() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-  const [usageStats, setUsageStats] = useState<UsageStats | null>(null);
+  const [overviewStats, setOverviewStats] = useState<OverviewStats | null>(null);
+  const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showCreateKey, setShowCreateKey] = useState(false);
   const [newKeyName, setNewKeyName] = useState('');
   const [newKeyRateLimit, setNewKeyRateLimit] = useState('1000');
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
-    loadApiKeys();
-    loadUsageStats();
-  }, []);
+    if (status === 'loading') return;
+    
+    if (!session) {
+      router.push('/auth/signin');
+      return;
+    }
 
-  const loadApiKeys = async () => {
+    loadDashboardData();
+  }, [session, status, router]);
+
+  const loadDashboardData = async () => {
     try {
-      // Mock data for now - in real app, this would be from an API
-      const mockKeys: ApiKey[] = [
-        {
-          id: '1',
-          key: 'sk-abc123def456...',
-          name: 'Production Key',
-          isActive: true,
-          rateLimit: 1000,
-          createdAt: '2024-01-15T10:30:00Z',
-          lastUsedAt: '2024-01-20T14:22:00Z',
-        },
-        {
-          id: '2',
-          key: 'sk-xyz789uvw012...',
-          name: 'Development Key',
-          isActive: true,
-          rateLimit: 500,
-          createdAt: '2024-01-10T08:15:00Z',
-          lastUsedAt: '2024-01-19T16:45:00Z',
-        },
-      ];
-      setApiKeys(mockKeys);
+      setLoading(true);
+      const [overviewRes, keysRes] = await Promise.all([
+        apiClient.getOverview(),
+        apiClient.getApiKeys(),
+      ]);
+
+      if (overviewRes.success) {
+        setOverviewStats(overviewRes.data.stats);
+      }
+      
+      if (keysRes.success) {
+        setApiKeys(keysRes.data);
+      }
     } catch (error) {
-      console.error('Failed to load API keys:', error);
+      console.error('Failed to load dashboard data:', error);
+      toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadUsageStats = async () => {
+  const loadUsageData = async (period = 'month') => {
     try {
-      // Mock data for now
-      const mockStats: UsageStats = {
-        period: 'month',
-        totalRequests: 1247,
-        totalCost: 23.45,
-        breakdown: [
-          {
-            endpoint: 'chat/completions',
-            model: 'gpt-3.5-turbo',
-            requests: 890,
-            tokensUsed: 234500,
-            cost: 12.34,
-            avgResponseTime: 450,
-          },
-          {
-            endpoint: 'chat/completions',
-            model: 'gpt-4',
-            requests: 234,
-            tokensUsed: 89200,
-            cost: 8.92,
-            avgResponseTime: 1200,
-          },
-          {
-            endpoint: 'images/generations',
-            model: 'dall-e-3',
-            requests: 123,
-            tokensUsed: 0,
-            cost: 2.19,
-            avgResponseTime: 3400,
-          },
-        ],
-      };
-      setUsageStats(mockStats);
+      const response = await apiClient.getUsageAnalytics({ period });
+      if (response.success) {
+        setUsageData(response.data);
+      }
     } catch (error) {
-      console.error('Failed to load usage stats:', error);
+      console.error('Failed to load usage data:', error);
+      toast.error('Failed to load usage data');
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success('Copied to clipboard!');
+  useEffect(() => {
+    if (session && activeTab === 'usage') {
+      loadUsageData();
+    }
+  }, [session, activeTab]);
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied to clipboard!');
+    } catch (error) {
+      toast.error('Failed to copy to clipboard');
+    }
   };
 
   const createApiKey = async () => {
@@ -131,37 +145,98 @@ export default function Home() {
     }
 
     try {
-      // Mock API call
-      const newKey: ApiKey = {
-        id: Date.now().toString(),
-        key: `sk-${Math.random().toString(36).substring(2, 15)}${Math.random().toString(36).substring(2, 15)}`,
-        name: newKeyName,
-        isActive: true,
+      const response = await apiClient.createApiKey({
+        name: newKeyName.trim(),
         rateLimit: parseInt(newKeyRateLimit),
-        createdAt: new Date().toISOString(),
-      };
-      
-      setApiKeys([newKey, ...apiKeys]);
-      setNewKeyName('');
-      setNewKeyRateLimit('1000');
-      setShowCreateKey(false);
-      toast.success('API key created successfully!');
-    } catch (error) {
-      toast.error('Failed to create API key');
+      });
+
+      if (response.success) {
+        setApiKeys([response.data, ...apiKeys]);
+        setNewKeyName('');
+        setNewKeyRateLimit('1000');
+        setShowCreateKey(false);
+        toast.success('API key created successfully!');
+        
+        // Show the full key in a toast for the user to copy
+        toast.success(`Your new API key: ${response.data.key}`, {
+          duration: 10000,
+          action: {
+            label: 'Copy',
+            onClick: () => copyToClipboard(response.data.key),
+          },
+        });
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to create API key');
     }
   };
+
+  const deleteApiKey = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this API key? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await apiClient.deleteApiKey(id);
+      if (response.success) {
+        setApiKeys(apiKeys.filter(key => key.id !== id));
+        toast.success('API key deleted successfully');
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to delete API key');
+    }
+  };
+
+  const toggleApiKeyStatus = async (id: string, isActive: boolean) => {
+    try {
+      const response = await apiClient.updateApiKey(id, { isActive: !isActive });
+      if (response.success) {
+        setApiKeys(apiKeys.map(key => 
+          key.id === id ? { ...key, isActive: !isActive } : key
+        ));
+        toast.success(`API key ${!isActive ? 'activated' : 'deactivated'} successfully`);
+      }
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update API key');
+    }
+  };
+
+  const handleSignOut = () => {
+    signOut({ callbackUrl: '/auth/signin' });
+  };
+
+  if (status === 'loading' || loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return null; // Will redirect to signin
+  }
 
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto py-8 px-4">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Salim API Platform</h1>
-          <p className="text-muted-foreground text-lg">
-            Professional AI API platform with OpenAI-compatible endpoints
-          </p>
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-4xl font-bold mb-2">API Dashboard</h1>
+            <p className="text-muted-foreground text-lg">
+              Welcome back, {session.user?.name}!
+            </p>
+          </div>
+          <Button variant="outline" onClick={handleSignOut}>
+            <LogOut className="h-4 w-4 mr-2" />
+            Sign Out
+          </Button>
         </div>
 
-        <Tabs defaultValue="overview" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="keys">API Keys</TabsTrigger>
@@ -170,84 +245,88 @@ export default function Home() {
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Requests</CardTitle>
-                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{usageStats?.totalRequests || 0}</div>
-                  <p className="text-xs text-muted-foreground">Last 30 days</p>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Cost</CardTitle>
-                  <Key className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">${usageStats?.totalCost.toFixed(2) || '0.00'}</div>
-                  <p className="text-xs text-muted-foreground">Last 30 days</p>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Active Keys</CardTitle>
-                  <Key className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{apiKeys.filter(k => k.isActive).length}</div>
-                  <p className="text-xs text-muted-foreground">Total: {apiKeys.length}</p>
-                </CardContent>
-              </Card>
-              
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Avg Response Time</CardTitle>
-                  <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">680ms</div>
-                  <p className="text-xs text-muted-foreground">Last 30 days</p>
-                </CardContent>
-              </Card>
-            </div>
+            {overviewStats && (
+              <>
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Total Requests</CardTitle>
+                      <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{overviewStats.totalRequests.toLocaleString()}</div>
+                      <p className="text-xs text-muted-foreground">Last 30 days</p>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Total Cost</CardTitle>
+                      <Key className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">${overviewStats.totalCost.toFixed(2)}</div>
+                      <p className="text-xs text-muted-foreground">Last 30 days</p>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Active Keys</CardTitle>
+                      <Key className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{overviewStats.activeKeys}</div>
+                      <p className="text-xs text-muted-foreground">Total: {overviewStats.totalKeys}</p>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Avg Response Time</CardTitle>
+                      <Clock className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{overviewStats.avgResponseTime}ms</div>
+                      <p className="text-xs text-muted-foreground">Last 30 days</p>
+                    </CardContent>
+                  </Card>
+                </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Quick Start</CardTitle>
-                <CardDescription>
-                  Get started with our OpenAI-compatible API in minutes
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Alert>
-                  <Code className="h-4 w-4" />
-                  <AlertDescription>
-                    Our API is fully compatible with OpenAI SDK. Just change the base URL and use your API key.
-                  </AlertDescription>
-                </Alert>
-                
-                <div className="bg-muted p-4 rounded-lg">
-                  <pre className="text-sm">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Quick Start</CardTitle>
+                    <CardDescription>
+                      Get started with our OpenAI-compatible API in minutes
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <Alert>
+                      <Code className="h-4 w-4" />
+                      <AlertDescription>
+                        Our API is fully compatible with OpenAI SDK. Just change the base URL and use your API key.
+                      </AlertDescription>
+                    </Alert>
+                    
+                    <div className="bg-muted p-4 rounded-lg">
+                      <pre className="text-sm">
 {`import OpenAI from 'openai';
 
 const openai = new OpenAI({
   apiKey: 'sk-your-api-key',
-  baseURL: 'https://your-domain.com/api/v1',
+  baseURL: '${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/v1',
 });
 
 const response = await openai.chat.completions.create({
   model: 'gpt-3.5-turbo',
   messages: [{ role: 'user', content: 'Hello!' }],
 });`}
-                  </pre>
-                </div>
-              </CardContent>
-            </Card>
+                      </pre>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
           </TabsContent>
 
           <TabsContent value="keys" className="space-y-6">
@@ -308,6 +387,11 @@ const response = await openai.chat.completions.create({
                           <Badge variant={apiKey.isActive ? 'default' : 'secondary'}>
                             {apiKey.isActive ? 'Active' : 'Inactive'}
                           </Badge>
+                          {apiKey.usageCount && (
+                            <Badge variant="outline">
+                              {apiKey.usageCount} uses
+                            </Badge>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <span className="font-mono">{apiKey.key}</span>
@@ -330,10 +414,18 @@ const response = await openai.chat.completions.create({
                         </div>
                       </div>
                       <div className="flex gap-2">
-                        <Button variant="ghost" size="sm">
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => toggleApiKeyStatus(apiKey.id, apiKey.isActive)}
+                        >
                           <Settings className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="sm">
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => deleteApiKey(apiKey.id)}
+                        >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -350,16 +442,68 @@ const response = await openai.chat.completions.create({
               <p className="text-muted-foreground">Monitor your API usage and costs</p>
             </div>
 
-            {usageStats && (
+            {usageData && (
               <div className="space-y-6">
+                <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Total Requests</CardTitle>
+                      <BarChart3 className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{usageData.totalRequests.toLocaleString()}</div>
+                      <p className="text-xs text-muted-foreground">Last {usageData.period}</p>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Total Cost</CardTitle>
+                      <Key className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">${usageData.totalCost.toFixed(2)}</div>
+                      <p className="text-xs text-muted-foreground">Last {usageData.period}</p>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
+                      {usageData.summary.successRate >= 95 ? (
+                        <TrendingUp className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <TrendingDown className="h-4 w-4 text-red-600" />
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{usageData.summary.successRate.toFixed(1)}%</div>
+                      <p className="text-xs text-muted-foreground">
+                        {usageData.summary.successfulRequests} / {usageData.totalRequests} successful
+                      </p>
+                    </CardContent>
+                  </Card>
+                  
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-sm font-medium">Avg Response Time</CardTitle>
+                      <Clock className="h-4 w-4 text-muted-foreground" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold">{usageData.avgResponseTime}ms</div>
+                      <p className="text-xs text-muted-foreground">Last {usageData.period}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
                 <Card>
                   <CardHeader>
                     <CardTitle>Usage Breakdown</CardTitle>
-                    <CardDescription>Last 30 days</CardDescription>
+                    <CardDescription>Last {usageData.period}</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {usageStats.breakdown.map((item, index) => (
+                      {usageData.breakdown.map((item, index) => (
                         <div key={index} className="flex justify-between items-center p-4 border rounded-lg">
                           <div>
                             <div className="font-semibold">{item.endpoint}</div>
@@ -371,6 +515,33 @@ const response = await openai.chat.completions.create({
                             <div className="font-semibold">${item.cost.toFixed(2)}</div>
                             <div className="text-sm text-muted-foreground">
                               {item.avgResponseTime}ms avg
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Recent Activity</CardTitle>
+                    <CardDescription>Latest API calls</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4 max-h-96 overflow-y-auto">
+                      {usageData.recentUsage.map((item) => (
+                        <div key={item.id} className="flex justify-between items-center p-4 border rounded-lg">
+                          <div>
+                            <div className="font-semibold">{item.endpoint}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {item.apiKeyName} • {item.model} • {new Date(item.createdAt).toLocaleString()}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-semibold">${item.cost.toFixed(4)}</div>
+                            <div className="text-sm text-muted-foreground">
+                              {item.requestTime}ms • Status: {item.statusCode}
                             </div>
                           </div>
                         </div>
@@ -395,7 +566,7 @@ const response = await openai.chat.completions.create({
                 </CardHeader>
                 <CardContent>
                   <code className="bg-muted px-2 py-1 rounded">
-                    https://your-domain.com/api/v1
+                    {process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/v1
                   </code>
                 </CardContent>
               </Card>
@@ -430,32 +601,6 @@ const response = await openai.chat.completions.create({
                   <div>
                     <h4 className="font-semibold">GET /v1/models</h4>
                     <p className="text-sm text-muted-foreground">List available models</p>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>Supported Models</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <div>
-                      <h4 className="font-semibold">Text Models</h4>
-                      <ul className="text-sm text-muted-foreground">
-                        <li>• gpt-3.5-turbo</li>
-                        <li>• gpt-4</li>
-                        <li>• gpt-4-turbo</li>
-                        <li>• gpt-4o</li>
-                      </ul>
-                    </div>
-                    <div>
-                      <h4 className="font-semibold">Image Models</h4>
-                      <ul className="text-sm text-muted-foreground">
-                        <li>• dall-e-3</li>
-                        <li>• dall-e-2</li>
-                      </ul>
-                    </div>
                   </div>
                 </CardContent>
               </Card>
